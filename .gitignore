@@ -1,3 +1,5 @@
 RemoteControlService.Console/obj/
 RemoteControlService.Core/obj/
 RemoteControlService.Console/bin/
+packages/
+RemoteControlService.Core/bin/
