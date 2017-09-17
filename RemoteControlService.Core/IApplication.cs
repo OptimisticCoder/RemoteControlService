@@ -4,5 +4,7 @@
     {
         void Start();
         void Stop();
+
+        int GetCount();
     }
 }

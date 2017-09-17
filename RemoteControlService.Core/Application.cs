@@ -1,54 +1,89 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Autofac;
+using Autofac.Extensions.DependencyInjection;
+using Autofac.Integration.WebApi;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Owin.Hosting;
+using Owin;
 using System;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Web.Http;
 
 namespace RemoteControlService.Core
 {
     public class Application : IApplication
     {
-        private static IServiceProvider _provider;
+        private static IContainer _container;
         private readonly ILogger _logger;
         private readonly CancellationTokenSource _cancellationToken;
+        private IDisposable _webApi;
+        private int _counter = 0;
 
         public static IServiceProvider ConfigureServices()
         {
-            IServiceCollection serviceCollection = new ServiceCollection();
-            _provider = serviceCollection.AddLogging()
-                                         .AddSingleton<IApplication, Application>()
-                                         .BuildServiceProvider();
+            var builder = new ContainerBuilder();
+            builder.RegisterApiControllers(Assembly.GetExecutingAssembly());
 
-            return _provider;
+            builder.Populate(new ServiceCollection().AddLogging()
+                                                    .AddSingleton<IApplication, Application>());
+            _container = builder.Build();
+
+            return _container.Resolve<IServiceProvider>();
         }
 
         public Application()
         {
-            _logger = _provider.GetService<ILoggerFactory>().CreateLogger<Application>();
+            _logger = _container.Resolve<ILoggerFactory>().CreateLogger<Application>();
+
             _cancellationToken = new CancellationTokenSource();
+            _cancellationToken.Token.Register(() =>
+            {
+                _webApi.Dispose();
+                _logger.LogInformation("Stopped");
+            });
         }
 
         public void Start()
         {
-            _logger.LogInformation("Started running the WebApi ...");
+            _webApi = WebApp.Start("http://localhost:12345", (appBuilder) =>
+            {
+                var config = new HttpConfiguration();
+                config.MapHttpAttributeRoutes();
+
+                config.DependencyResolver = new AutofacWebApiDependencyResolver(_container);
+
+                config.Routes.MapHttpRoute(
+                    name: "DefaultApi",
+                    routeTemplate: "{controller}/{id}",
+                    defaults: new { id = RouteParameter.Optional }
+                );
+
+                appBuilder.UseWebApi(config);
+            });
+
+            _logger.LogInformation("Started");
 
             Task.Run(() =>
             {
-                using (WebApp.Start<Startup>("http://localhost:12345"))
+                while (!_cancellationToken.IsCancellationRequested)
                 {
-                    while (!_cancellationToken.IsCancellationRequested)
-                    {
-                    }
+                    Thread.Sleep(1000);
+                    ++_counter;
                 }
-
-                _logger.LogInformation("Stopped");
             });
         }
 
         public void Stop()
         {
             _cancellationToken.Cancel();
+        }
+
+        public int GetCount()
+        {
+            _logger.LogInformation("Count was requested");
+            return _counter;
         }
     }
 }
